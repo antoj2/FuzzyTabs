@@ -1,10 +1,10 @@
 (function() {
   const DEBUG = false;
-  const log = (...args) => { if (!DEBUG) return; try { console.debug('[FuzzyTabs][content]', ...args); } catch (_) {} };
+  const log = (...args) => { if (!DEBUG) return; try { console.debug('[FuzzyTabs][content]', ...args); } catch (_) { } };
   log('content script loaded', { url: location.href });
 
   // State for results navigation
-  const STATE = { allTabs: [], tabs: [], focusedIndex: -1, query: '', allowMouseFocus: false };
+  const STATE = { allTabs: [], tabs: [], focusedIndex: -1, query: '', allowMouseFocus: false, searchContentMode: false };
 
   function getUIElements() {
     const input = document.getElementById("fuzzy-tabs-input");
@@ -27,7 +27,7 @@
     const li = items[newIndex];
     if (li) {
       li.classList.add('focused');
-      try { li.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+      try { li.scrollIntoView({ block: 'nearest' }); } catch (_) { }
     }
   }
 
@@ -39,6 +39,24 @@
     setFocusedIndex(next);
   }
 
+  function fetchTabsContent() {
+    const api = (typeof browser !== 'undefined') ? browser : chrome;
+    STATE.allTabs.forEach(tab => {
+      if (!tab.url.startsWith('chrome://') && !tab.url.startsWith('about:')) {
+        log("fetching content for tab", tab.id, tab.url);
+        api.runtime.sendMessage({ type: 'get-tab-content', tabId: tab.id }, (resp) => {
+          if (resp && resp.ok) {
+            tab.content = resp.content;
+            log("received content for tab", tab.id, { length: (resp.content || '').length });
+            // Re-render if the user is currently typing
+            if (STATE.query) computeResultsAndRender();
+          }
+        });
+      }
+    });
+  }
+
+
   function activateTabById(tabId) {
     try {
       const api = (typeof browser !== 'undefined') ? browser : chrome;
@@ -48,7 +66,7 @@
           closeExtensionWindow();
         }
       });
-    } catch (_) {}
+    } catch (_) { }
   }
 
   function buildHighlightedSpan(text, ranges) {
@@ -72,17 +90,17 @@
     const q = (input && input.value || '').trim();
     STATE.query = q;
     if (!q) {
-        // No query: show all tabs sorted by most recent first
-        const sortedTabs = STATE.allTabs
-            .slice()
-            .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))
-            .map(t => ({item: t}));
-        renderTabsList(sortedTabs);
-        return;
+      // No query: show all tabs sorted by most recent first
+      const sortedTabs = STATE.allTabs
+        .slice()
+        .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))
+        .map(t => ({ item: t }));
+      renderTabsList(sortedTabs);
+      return;
     }
 
     const fuzzySearch = window.Microfuzz.createFuzzySearch(STATE.allTabs, {
-        getText: (item) => [item.title, item.url]
+      getText: (item) => STATE.searchContentMode ? [item.title, item.url, item.content || ''] : [item.title, item.url],
     })
     const fuzzySearchResults = fuzzySearch(q)
     renderTabsList(fuzzySearchResults);
@@ -138,7 +156,7 @@
             if (api && api.runtime && typeof api.runtime.getURL === 'function') {
               return api.runtime.getURL('icons/ic_search.svg');
             }
-          } catch (_) {}
+          } catch (_) { }
           return null;
         };
 
@@ -151,13 +169,16 @@
               favicon = u.origin + '/favicon.ico';
             }
           }
-        } catch (_) {}
+        } catch (_) { }
         // If favicon is unsafe (e.g., chrome://mozapps/.../extension.svg), use default icon
         if (!isSafeFaviconUrl(favicon)) {
           favicon = getDefaultIconUrl();
         }
         if (favicon) img.src = favicon;
         img.addEventListener('error', () => { img.style.visibility = 'hidden'; });
+
+        const textContainer = document.createElement('div');
+        textContainer.className = 'fsl-text-cont';
 
         // title and url with highlight
         const titleSpan = document.createElement('span');
@@ -180,10 +201,35 @@
           urlSpan.textContent = urlText;
         }
 
+        textContainer.appendChild(titleSpan);
+        textContainer.appendChild(urlSpan);
+
+        if (STATE.searchContentMode && t.content && matches && matches[2]) {
+          const contentMatches = matches[2];
+          const firstMatch = contentMatches[0][0];
+
+          // Extract snippet: 40 chars before and after the first match
+          const start = Math.max(0, firstMatch - 40);
+          const end = Math.min(t.content.length, firstMatch + 80);
+          let snippetText = t.content.slice(start, end).replace(/\s+/g, ' ');
+
+          // Adjust match ranges to be relative to the snippet
+          const snippetMatches = contentMatches
+            .map(([a, b]) => [a - start, b - start])
+            .filter(([a, b]) => a >= 0 && b < snippetText.length);
+
+          const snippetSpan = document.createElement('div');
+          snippetSpan.className = 'fsl-snippet';
+          snippetSpan.appendChild(document.createTextNode(start > 0 ? '...' : ''));
+          snippetSpan.appendChild(buildHighlightedSpan(snippetText, snippetMatches));
+          snippetSpan.appendChild(document.createTextNode(end < t.content.length ? '...' : ''));
+          textContainer.appendChild(snippetSpan);
+        }
+
+
         li.appendChild(arrow);
         li.appendChild(img);
-        li.appendChild(titleSpan);
-        li.appendChild(urlSpan);
+        li.appendChild(textContainer);
 
         // close (cross) button on the right
         const closeBtn = document.createElement('button');
@@ -218,9 +264,9 @@
                 } else {
                   computeResultsAndRender();
                 }
-              } catch (_) {}
+              } catch (_) { }
             });
-          } catch (_) {}
+          } catch (_) { }
         };
         closeBtn.addEventListener('click', handleClose);
 
@@ -241,7 +287,7 @@
             ev.preventDefault();
             const tabId = t.id;
             if (tabId != null) activateTabById(tabId);
-          } catch (_) {}
+          } catch (_) { }
         });
         // Fallback activation on click (in case mousedown was prevented by the page)
         li.addEventListener('click', (ev) => {
@@ -250,7 +296,7 @@
             ev.preventDefault();
             const tabId = t.id;
             if (tabId != null) activateTabById(tabId);
-          } catch (_) {}
+          } catch (_) { }
         });
 
         ul.appendChild(li);
@@ -285,6 +331,16 @@
     }
   }
 
+  browser.commands.onCommand.addListener((command) => {
+    if (command === 'toggle-page-content-search') {
+      STATE.searchContentMode = !STATE.searchContentMode;
+      if (STATE.searchContentMode) {
+        fetchTabsContent();
+      }
+      computeResultsAndRender();
+    }
+  });
+
   function initApp() {
     log('initApp');
     // On open, require a fresh mouse move to enable hover focusing
@@ -306,6 +362,7 @@
     document.addEventListener('keydown', (e) => {
       // Any key press disables mouse-driven focusing until the mouse moves again
       STATE.allowMouseFocus = false;
+
       if (e.key === 'Escape') {
         log('Escape pressed, closing');
         e.preventDefault();
@@ -369,9 +426,9 @@
                     // No items left; show empty message
                     computeResultsAndRender();
                   }
-                } catch (_) {}
+                } catch (_) { }
               });
-            } catch (_) {}
+            } catch (_) { }
           }
         }
       }
@@ -383,7 +440,7 @@
 
   // Close the extension window
   function closeExtensionWindow() {
-    try { window.close(); } catch (_) {}
+    try { window.close(); } catch (_) { }
   }
 
   initApp();

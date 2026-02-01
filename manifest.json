@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "FuzzyTabs",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Fuzzy-search through opened tabs",
   "icons": {
     "48": "icons/ic_search.svg"
@@ -12,11 +12,20 @@
     "default_popup": "app.html"
   },
   "permissions": [
-    "tabs"
+    "tabs",
+    "<all_urls>"
   ],
   "background": {
     "scripts": ["background.js"],
     "persistent": false
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{23031082-d876-4d0a-b621-4a644e1f0bd0}",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
   },
   "commands": {
     "_execute_browser_action": {
@@ -24,6 +33,13 @@
         "default": "Ctrl+Shift+Space"
       },
       "description": "Open FuzzyTabs"
+    },
+    "toggle-page-content-search": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+F",
+        "mac": "MacCtrl+Shift+F"
+      },
+      "description": "Toggle page search"
     }
   }
 }

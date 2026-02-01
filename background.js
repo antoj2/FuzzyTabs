@@ -1,8 +1,8 @@
-(function(){
+(function() {
   // Use browser.* if available, fallback to chrome.* for compatibility
   const api = (typeof browser !== 'undefined') ? browser : chrome;
-  const DEBUG = false;
-  const log = (...args) => { if (!DEBUG) return; try { console.debug('[FuzzyTabs][background]', ...args); } catch (_) {} };
+  const DEBUG = true;
+  const log = (...args) => { if (!DEBUG) return; try { console.debug('[FuzzyTabs][background]', ...args); } catch (_) { } };
   log('background loaded');
 
   // Small helpers to deduplicate repeated tab activation code
@@ -39,7 +39,7 @@
       activateTabAndRespond(tabId, sendResponse);
     }
   }
-  
+
   // Handle messages from content scripts
   if (api && api.runtime && api.runtime.onMessage) {
     api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -50,7 +50,7 @@
           api.tabs.query({}, (tabs) => {
             try {
               const data = (tabs || []).map(
-                  t => ({ id: t.id, title: t.title, url: t.url, favIconUrl: t.favIconUrl, active: t.active, windowId: t.windowId, lastAccessed: t.lastAccessed })
+                t => ({ id: t.id, title: t.title, url: t.url, favIconUrl: t.favIconUrl, active: t.active, windowId: t.windowId, lastAccessed: t.lastAccessed })
               );
               sendResponse({ ok: true, tabs: data });
             } catch (e) {
@@ -106,6 +106,18 @@
           } else {
             sendResponse({ ok: false, error: 'Invalid tabId' });
           }
+        } else if (msg.type === 'get-tab-content') {
+          api.tabs.executeScript(msg.tabId, {
+            code: "document.body.innerText"
+          }, (results) => {
+            log('get-tab-content results', results);
+            if (api.runtime.lastError || !results || !results.length) {
+              sendResponse({ ok: false });
+            } else {
+              sendResponse({ ok: true, content: results[0] });
+            }
+          });
+          return true;
         }
       } catch (e) {
         log('onMessage handler error', e);
