@@ -1,7 +1,7 @@
 (function() {
   // Use browser.* if available, fallback to chrome.* for compatibility
   const api = (typeof browser !== 'undefined') ? browser : chrome;
-  const DEBUG = true;
+  const DEBUG = false;
   const log = (...args) => { if (!DEBUG) return; try { console.debug('[FuzzyTabs][background]', ...args); } catch (_) { } };
   log('background loaded');
 
